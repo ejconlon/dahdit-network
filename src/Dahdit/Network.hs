@@ -1,6 +1,6 @@
 module Dahdit.Network
-  ( Encoder
-  , encodeHandle
+  ( Encoder (..)
+  , runEncoder
   , HostPort (..)
   , udpClient
   , withUdpClient
@@ -8,23 +8,28 @@ module Dahdit.Network
 where
 
 import Control.Exception (bracket, onException)
-import Dahdit (Binary (..), encode)
-import Data.ByteString (ByteString)
+import Dahdit (Binary (..), Put, putTarget)
 import Data.ByteString qualified as BS
 import Network.Socket qualified as NS
 import System.IO (Handle, IOMode (..), hFlush)
 
-newtype Decoder = Decoder {runDecoder :: forall a. Binary a => IO a}
+-- newtype Decoder = Decoder {unDecoder :: forall a. Get a -> IO a}
 
-newtype Encoder = Encoder {runEncoder :: forall a. Binary a => a -> IO ()}
+-- runDecoder :: Binary a => Decoder -> IO a
+-- runDecoder dec = unDecoder dec get
+
+newtype Encoder = Encoder {unEncoder :: Put -> IO ()}
+
+runEncoder :: Binary a => Encoder -> a -> IO ()
+runEncoder enc = unEncoder enc . put
 
 -- -- Need to take something more than handle here. Buffer unused data etc
 -- decodeHandle :: Binary a => Handle -> IO a
 -- decodeHandle = error "TODO"
 
-encodeHandle :: Binary a => Handle -> a -> IO ()
-encodeHandle h a = do
-  let bs = encode @_ @ByteString a
+encodeHandle :: Handle -> Put -> IO ()
+encodeHandle h p = do
+  let bs = putTarget p
   BS.hPut h bs
   hFlush h
 
