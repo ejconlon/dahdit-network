@@ -26,7 +26,7 @@ source-repository head
 
 library
   exposed-modules:
-      DahditNetwork.Main
+      Dahdit.Network
   other-modules:
       Paths_dahdit_network
   hs-source-dirs:
@@ -59,6 +59,9 @@ library
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -fno-warn-unused-top-binds
   build-depends:
       base >=4.12 && <5
+    , bytestring
+    , dahdit
+    , network
   default-language: GHC2021
 
 executable dahdit-network-exe
@@ -95,7 +98,10 @@ executable dahdit-network-exe
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -fno-warn-unused-top-binds -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.12 && <5
+    , bytestring
+    , dahdit
     , dahdit-network
+    , network
   default-language: GHC2021
 
 test-suite dahdit-network-test
@@ -133,7 +139,10 @@ test-suite dahdit-network-test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -fno-warn-unused-top-binds -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.12 && <5
+    , bytestring
+    , dahdit
     , dahdit-network
+    , network
     , tasty
     , tasty-hunit
   default-language: GHC2021

@@ -3,4 +3,5 @@ module Main
   )
 where
 
-import DahditNetwork.Main (main)
+main :: IO ()
+main = pure ()

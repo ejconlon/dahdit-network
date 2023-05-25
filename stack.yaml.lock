@@ -3,7 +3,29 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    commit: bf4c9bdbc3cf6eedf3d946704a6df3c027e5c888
+    git: git@github.com:ejconlon/dahdit.git
+    name: dahdit
+    pantry-tree:
+      sha256: da885ef542965cad5a54ea8f8c8af4b0fc06184d07c74a360ecf66969bc17454
+      size: 1690
+    version: 0.4.0
+  original:
+    commit: bf4c9bdbc3cf6eedf3d946704a6df3c027e5c888
+    git: git@github.com:ejconlon/dahdit.git
+- completed:
+    commit: 45406c35878d0f3efc4cf29b4f3f2182391bc27c
+    git: git@github.com:ejconlon/data-sword.git
+    name: data-sword
+    pantry-tree:
+      sha256: fb466911a26b1fe3a5f7ca96141b20c282a4f2151de281d7a97f84f96abc58a7
+      size: 552
+    version: 0.2.0.4
+  original:
+    commit: 45406c35878d0f3efc4cf29b4f3f2182391bc27c
+    git: git@github.com:ejconlon/data-sword.git
 snapshots:
 - completed:
     sha256: dcf4fc28f12d805480ddbe8eb8c370e11db12f0461d0110a4240af27ac88d725
