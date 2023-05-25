@@ -1,0 +1,82 @@
+name: dahdit-network
+version: 0.1.0
+
+github: ejconlon/dahdit-network
+license: BSD3
+author: Eric Conlon
+maintainer: ejconlon@gmail.com
+copyright: (c) 2023 Eric Conlon
+synopsis: Network protocol helpers for Dahdit
+description: Please see the README on GitHub at <https://github.com/ejconlon/dahdit-network#readme>
+tested-with: GHC == 9.2.7
+
+language: GHC2021
+
+extra-source-files:
+- README.md
+
+dependencies:
+- base >= 4.12 && < 5
+
+default-extensions:
+- BangPatterns
+- ConstraintKinds
+- DataKinds
+- DeriveFunctor
+- DeriveFoldable
+- DeriveGeneric
+- DeriveTraversable
+- DerivingStrategies
+- DerivingVia
+- FlexibleContexts
+- FlexibleInstances
+- FunctionalDependencies
+- GADTs
+- GeneralizedNewtypeDeriving
+- LambdaCase
+- KindSignatures
+- MultiParamTypeClasses
+- Rank2Types
+- ScopedTypeVariables
+- StandaloneDeriving
+- TupleSections
+- TypeApplications
+- TypeOperators
+- TypeFamilies
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wpartial-fields
+- -Wredundant-constraints
+- -fno-warn-unused-top-binds
+
+library:
+  source-dirs: src
+
+executables:
+  dahdit-network-exe:
+    main: Main.hs
+    source-dirs: exe
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - dahdit-network
+
+tests:
+  dahdit-network-test:
+    main: Main.hs
+    source-dirs: test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - dahdit-network
+    - tasty
+    - tasty-hunit
