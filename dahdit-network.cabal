@@ -59,9 +59,11 @@ library
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -fno-warn-unused-top-binds
   build-depends:
       base >=4.12 && <5
-    , bytestring
-    , dahdit
-    , network
+    , bytestring ==0.11.*
+    , dahdit ==0.4.*
+    , network ==3.1.*
+    , resourcet ==1.2.*
+    , unliftio-core ==0.2.*
   default-language: GHC2021
 
 executable dahdit-network-exe
@@ -98,10 +100,12 @@ executable dahdit-network-exe
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -fno-warn-unused-top-binds -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.12 && <5
-    , bytestring
-    , dahdit
+    , bytestring ==0.11.*
+    , dahdit ==0.4.*
     , dahdit-network
-    , network
+    , network ==3.1.*
+    , resourcet ==1.2.*
+    , unliftio-core ==0.2.*
   default-language: GHC2021
 
 test-suite dahdit-network-test
@@ -139,10 +143,12 @@ test-suite dahdit-network-test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -fno-warn-unused-top-binds -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.12 && <5
-    , bytestring
-    , dahdit
+    , bytestring ==0.11.*
+    , dahdit ==0.4.*
     , dahdit-network
-    , network
-    , tasty
-    , tasty-hunit
+    , network ==3.1.*
+    , resourcet ==1.2.*
+    , tasty ==1.4.*
+    , tasty-hunit ==0.10.*
+    , unliftio-core ==0.2.*
   default-language: GHC2021
