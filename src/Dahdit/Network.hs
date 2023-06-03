@@ -12,14 +12,18 @@ module Dahdit.Network
   , withUdpClient
   , udpServer
   , withUdpServer
+  , packetUdpClient
+  , withPacketUdpClient
   )
 where
 
+import Control.Monad (void)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Dahdit (Binary (..), Get, Put, putTarget)
 import Data.Acquire (Acquire, mkAcquire, withAcquire)
 import Data.ByteString qualified as BS
 import Network.Socket qualified as NS
+import Network.Socket.ByteString qualified as NSB
 import System.IO (Handle, IOMode (..), hFlush)
 
 newtype Decoder = Decoder {unDecoder :: forall a. Get a -> IO a}
@@ -77,18 +81,22 @@ targetResolve t@(Target (HostPort host port) sockTy) = do
     [] -> fail ("Could not resolve address: " ++ show t)
     info : _ -> pure info
 
-targetConnect :: Target -> IO NS.Socket
-targetConnect t = do
+targetOpen :: Target -> IO (NS.Socket, NS.SockAddr)
+targetOpen t = do
   info <- targetResolve t
   sock <- NS.openSocket info
-  NS.connect sock (NS.addrAddress info)
+  pure (sock, NS.addrAddress info)
+
+targetConnect :: Target -> IO NS.Socket
+targetConnect t = do
+  (sock, addr) <- targetOpen t
+  NS.connect sock addr
   pure sock
 
 targetBind :: Target -> IO NS.Socket
 targetBind t = do
-  info <- targetResolve t
-  sock <- NS.openSocket info
-  NS.bind sock (NS.addrAddress info)
+  (sock, addr) <- targetOpen t
+  NS.bind sock addr
   pure sock
 
 socketEncoder :: NS.Socket -> IO Encoder
@@ -106,6 +114,11 @@ socketBidi sock = do
   handle <- NS.socketToHandle sock ReadWriteMode
   decoder <- handleDecoder handle
   pure (handleEncoder handle, decoder)
+
+sendUdpEncoder :: NS.Socket -> NS.SockAddr -> Encoder
+sendUdpEncoder sock addr = Encoder $ \p -> do
+  bs <- putTarget p
+  void (NSB.sendTo sock bs addr)
 
 tcpClient :: HostPort -> TcpOpts -> Acquire (Encoder, Decoder)
 tcpClient hp (TcpOpts finTo) = fmap (\(enc, dec, _) -> (enc, dec)) (mkAcquire acq rel)
@@ -143,3 +156,16 @@ udpServer hp = fmap fst (mkAcquire acq rel)
 
 withUdpServer :: HostPort -> (Decoder -> IO a) -> IO a
 withUdpServer = withAcquire . udpServer
+
+-- | Send UDP messages without connecting.
+-- Each invocation of the encoder sends a separate packet.
+packetUdpClient :: HostPort -> Acquire Encoder
+packetUdpClient hp = fmap fst (mkAcquire acq rel)
+ where
+  acq = do
+    (sock, addr) <- targetOpen (Target hp SockTyUdp)
+    pure (sendUdpEncoder sock addr, sock)
+  rel = NS.close . snd
+
+withPacketUdpClient :: HostPort -> (Encoder -> IO a) -> IO a
+withPacketUdpClient = withAcquire . packetUdpClient
