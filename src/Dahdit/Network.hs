@@ -10,6 +10,8 @@ module Dahdit.Network
   , withTcpClient
   , udpClient
   , withUdpClient
+  , udpServer
+  , withUdpServer
   )
 where
 
@@ -82,6 +84,13 @@ targetConnect t = do
   NS.connect sock (NS.addrAddress info)
   pure sock
 
+targetBind :: Target -> IO NS.Socket
+targetBind t = do
+  info <- targetResolve t
+  sock <- NS.openSocket info
+  NS.bind sock (NS.addrAddress info)
+  pure sock
+
 socketEncoder :: NS.Socket -> IO Encoder
 socketEncoder sock = do
   handle <- NS.socketToHandle sock WriteMode
@@ -111,7 +120,6 @@ tcpClient hp (TcpOpts finTo) = fmap (\(enc, dec, _) -> (enc, dec)) (mkAcquire ac
 withTcpClient :: MonadUnliftIO m => HostPort -> TcpOpts -> (Encoder -> Decoder -> m a) -> m a
 withTcpClient hp to f = withAcquire (tcpClient hp to) (uncurry f)
 
--- Should be called with async exceptions masked
 udpClient :: HostPort -> Acquire Encoder
 udpClient hp = fmap fst (mkAcquire acq rel)
  where
@@ -123,3 +131,15 @@ udpClient hp = fmap fst (mkAcquire acq rel)
 
 withUdpClient :: HostPort -> (Encoder -> IO a) -> IO a
 withUdpClient = withAcquire . udpClient
+
+udpServer :: HostPort -> Acquire Decoder
+udpServer hp = fmap fst (mkAcquire acq rel)
+ where
+  acq = do
+    sock <- targetBind (Target hp SockTyUdp)
+    dec <- socketDecoder sock
+    pure (dec, sock)
+  rel = NS.close . snd
+
+withUdpServer :: HostPort -> (Decoder -> IO a) -> IO a
+withUdpServer = withAcquire . udpServer
