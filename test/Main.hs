@@ -25,7 +25,7 @@ testUdp = testCase "udp" $ do
   let someFoo = Foo 42 True
       someBar = Bar 'x' 42
   let lim = Just 1024
-      hp = HostPort "127.0.0.1" 58764
+      hp = HostPort (Just "127.0.0.1") 58764
   readyVar <- newEmptyTMVarIO
   finishVar <- newTVarIO (0 :: Int)
   sx <- async $ withUdpServerConn lim hp $ \(Conn dec enc) -> do

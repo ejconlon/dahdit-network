@@ -6,6 +6,7 @@ module Dahdit.Network
   , Conn (..)
   , HostPort (..)
   , TcpOpts (..)
+  , resolveAddr
   , tcpClientConn
   , withTcpClientConn
   , tcpServerConn
@@ -100,7 +101,7 @@ datagramServerEncoder sock = Encoder (\addr -> putTarget >=> flip (NSB.sendAllTo
 data Conn k = Conn {connDecoder :: Decoder k, connEncoder :: Encoder k}
 
 data HostPort = HostPort
-  { hpHost :: !String
+  { hpHost :: !(Maybe String)
   , hpPort :: !Int
   }
   deriving stock (Eq, Ord, Show)
@@ -127,16 +128,23 @@ data Target = Target
   }
   deriving stock (Eq, Ord, Show)
 
+resolveAddr :: HostPort -> IO NS.SockAddr
+resolveAddr hp@(HostPort host port) = do
+  infos <- NS.getAddrInfo Nothing host (Just (show port))
+  case infos of
+    [] -> fail ("Could not resolve address: " ++ show hp)
+    info : _ -> pure (NS.addrAddress info)
+
 targetResolve :: Target -> IO NS.AddrInfo
-targetResolve t@(Target (HostPort host port) sockTy role) = do
+targetResolve (Target hp@(HostPort host port) sockTy role) = do
   let hints =
         NS.defaultHints
           { NS.addrSocketType = sockTyReal sockTy
           , NS.addrFlags = [NS.AI_PASSIVE | role == RoleServer]
           }
-  infos <- NS.getAddrInfo (Just hints) (Just host) (Just (show port))
+  infos <- NS.getAddrInfo (Just hints) host (Just (show port))
   case infos of
-    [] -> fail ("Could not resolve address: " ++ show t)
+    [] -> fail ("Could not resolve address: " ++ show hp)
     info : _ -> pure info
 
 targetOpen :: Target -> IO (NS.Socket, NS.SockAddr)
