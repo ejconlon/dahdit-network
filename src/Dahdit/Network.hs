@@ -1,49 +1,98 @@
 module Dahdit.Network
   ( Decoder (..)
   , runDecoder
-  , handleDecoder
   , Encoder (..)
   , runEncoder
-  , handleEncoder
   , HostPort (..)
-  , tcpClient
-  , withTcpClient
-  , udpClient
-  , withUdpClient
-  , udpServer
-  , withUdpServer
-  , packetUdpClient
-  , withPacketUdpClient
+  , tcpClientConn
+  , withTcpClientConn
+  , tcpServerConn
+  , udpClientConn
+  , withUdpClientConn
+  , udpServerConn
+  , withUdpServerConn
   )
 where
 
-import Control.Monad (void)
+import Control.Monad (unless, (>=>))
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.IO.Unlift (MonadUnliftIO)
-import Dahdit (Binary (..), Get, Put, putTarget)
+import Dahdit (Binary (..), ByteCount (..), Get, GetError, GetIncCb, GetIncRequest (..), Put, getEnd, getTarget, getTargetInc, putTarget)
 import Data.Acquire (Acquire, mkAcquire, withAcquire)
+import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Tuple (swap)
 import Network.Socket qualified as NS
 import Network.Socket.ByteString qualified as NSB
-import System.IO (Handle, IOMode (..), hFlush)
 
-newtype Decoder = Decoder {unDecoder :: forall a. Get a -> IO a}
+maxRecv :: Int
+maxRecv = 65535
 
-runDecoder :: Binary a => Decoder -> IO a
+sockRecvUntil :: NS.Socket -> IORef ByteString -> Int -> IO ()
+sockRecvUntil sock ref len = go
+ where
+  go = do
+    lastBs <- readIORef ref
+    unless (BS.length lastBs >= len) $ do
+      chunkBs <- NSB.recv sock maxRecv
+      modifyIORef' ref (<> chunkBs)
+      unless (BS.null chunkBs) go
+
+-- Appropriate for TCP connections (uses 'recv' instead of 'recvFrom')
+sockGetIncCb :: NS.Socket -> IO (GetIncCb ByteString IO)
+sockGetIncCb sock = do
+  ref <- newIORef mempty
+  pure $ \(GetIncRequest _ (ByteCount off) (ByteCount len)) -> do
+    modifyIORef' ref (BS.drop off)
+    sockRecvUntil sock ref len
+    nextBs <- readIORef ref
+    pure (if BS.length nextBs >= len then Nothing else Just nextBs)
+
+newtype Decoder k = Decoder {unDecoder :: forall a. Get a -> IO (k, Either GetError a)}
+  deriving stock (Functor)
+
+runDecoder :: Binary a => Decoder k -> IO (k, Either GetError a)
 runDecoder dec = unDecoder dec get
 
-handleDecoder :: Handle -> IO Decoder
-handleDecoder = error "TODO"
+-- | Decodes a stream of packets incrementally for TCP
+streamDecoder :: Maybe ByteCount -> NS.Socket -> IO (Decoder ())
+streamDecoder mayLim sock = do
+  cb <- sockGetIncCb sock
+  pure (Decoder (\getter -> fmap (\(res, _, _) -> ((), res)) (getTargetInc mayLim getter cb)))
 
-newtype Encoder = Encoder {unEncoder :: Put -> IO ()}
+-- | Completely decodes one packet at a time for UDP server
+datagramServerDecoder :: Maybe ByteCount -> NS.Socket -> Decoder NS.SockAddr
+datagramServerDecoder mayLim sock =
+  let lim = maybe maxRecv unByteCount mayLim
+  in  Decoder $ \getter -> do
+        (bs, addr) <- NSB.recvFrom sock lim
+        (ea, _) <- getTarget (getEnd getter) bs
+        pure (addr, ea)
 
-runEncoder :: Binary a => Encoder -> a -> IO ()
-runEncoder enc = unEncoder enc . put
+datagramClientDecoder :: Maybe ByteCount -> NS.Socket -> Decoder ()
+datagramClientDecoder mayLim sock =
+  let lim = maybe maxRecv unByteCount mayLim
+  in  Decoder $ \getter -> do
+        bs <- NSB.recv sock lim
+        (ea, _) <- getTarget (getEnd getter) bs
+        pure ((), ea)
 
-handleEncoder :: Handle -> Encoder
-handleEncoder h = Encoder $ \p -> do
-  bs <- putTarget p
-  BS.hPut h bs
-  hFlush h
+newtype Encoder k = Encoder {unEncoder :: k -> Put -> IO ()}
+
+runEncoder :: Binary a => Encoder k -> k -> a -> IO ()
+runEncoder enc k = unEncoder enc k . put
+
+streamEncoder :: NS.Socket -> Encoder ()
+streamEncoder sock = Encoder (\_ -> putTarget >=> NSB.sendAll sock)
+
+datagramClientEncoder :: NS.Socket -> Encoder ()
+datagramClientEncoder sock = Encoder (\_ -> putTarget >=> NSB.sendAll sock)
+
+datagramServerEncoder :: NS.Socket -> Encoder NS.SockAddr
+datagramServerEncoder sock = Encoder (\addr -> putTarget >=> flip (NSB.sendAllTo sock) addr)
+
+data Conn k = Conn {connDecoder :: Decoder k, connEncoder :: Encoder k}
 
 data HostPort = HostPort
   { hpHost :: !(Maybe String)
@@ -51,11 +100,7 @@ data HostPort = HostPort
   }
   deriving stock (Eq, Ord, Show)
 
-newtype TcpOpts = TcpOpts {tcoFinTimeout :: Int}
-  deriving newtype (Show)
-  deriving stock (Eq, Ord)
-
-newtype ServerOpts = ServerOpts {soMaxClients :: Int}
+newtype TcpOpts = TcpOpts {tcoFinTimeoutMs :: Int}
   deriving newtype (Show)
   deriving stock (Eq, Ord)
 
@@ -67,15 +112,23 @@ sockTyReal = \case
   SockTyTcp -> NS.Stream
   SockTyUdp -> NS.Datagram
 
+data Role = RoleServer | RoleClient
+  deriving stock (Eq, Ord, Show)
+
 data Target = Target
   { targetHp :: !HostPort
   , targetSockTy :: !SockTy
+  , targetRole :: !Role
   }
   deriving stock (Eq, Ord, Show)
 
 targetResolve :: Target -> IO NS.AddrInfo
-targetResolve t@(Target (HostPort host port) sockTy) = do
-  let hints = NS.defaultHints {NS.addrSocketType = sockTyReal sockTy}
+targetResolve t@(Target (HostPort host port) sockTy role) = do
+  let hints =
+        NS.defaultHints
+          { NS.addrSocketType = sockTyReal sockTy
+          , NS.addrFlags = [NS.AI_PASSIVE | role == RoleServer]
+          }
   infos <- NS.getAddrInfo (Just hints) host (Just (show port))
   case infos of
     [] -> fail ("Could not resolve address: " ++ show t)
@@ -87,85 +140,88 @@ targetOpen t = do
   sock <- NS.openSocket info
   pure (sock, NS.addrAddress info)
 
-targetConnect :: Target -> IO NS.Socket
+targetConnect :: Target -> IO (NS.Socket, NS.SockAddr)
 targetConnect t = do
-  (sock, addr) <- targetOpen t
+  p@(sock, addr) <- targetOpen t
   NS.connect sock addr
-  pure sock
+  pure p
 
 targetBind :: Target -> IO NS.Socket
 targetBind t = do
   (sock, addr) <- targetOpen t
+  NS.setSocketOption sock NS.ReuseAddr 1
+  NS.withFdSocket sock NS.setCloseOnExecIfNeeded
   NS.bind sock addr
   pure sock
 
-socketEncoder :: NS.Socket -> IO Encoder
-socketEncoder sock = do
-  handle <- NS.socketToHandle sock WriteMode
-  pure (handleEncoder handle)
+tcpClientSock :: HostPort -> TcpOpts -> Acquire (NS.SockAddr, NS.Socket)
+tcpClientSock hp (TcpOpts finTo) = mkAcquire acq rel
+ where
+  acq = fmap swap (targetConnect (Target hp SockTyTcp RoleClient))
+  rel (_, sock) = if finTo > 0 then NS.gracefulClose sock finTo else NS.close sock
 
-socketDecoder :: NS.Socket -> IO Decoder
-socketDecoder sock = do
-  handle <- NS.socketToHandle sock ReadMode
-  handleDecoder handle
+tcpClientConn :: Maybe ByteCount -> HostPort -> TcpOpts -> Acquire (NS.SockAddr, Conn ())
+tcpClientConn mayLim hp to = do
+  (addr, sock) <- tcpClientSock hp to
+  dec <- liftIO (streamDecoder mayLim sock)
+  let enc = streamEncoder sock
+  pure (addr, Conn dec enc)
 
-socketBidi :: NS.Socket -> IO (Encoder, Decoder)
-socketBidi sock = do
-  handle <- NS.socketToHandle sock ReadWriteMode
-  decoder <- handleDecoder handle
-  pure (handleEncoder handle, decoder)
+withTcpClientConn :: MonadUnliftIO m => Maybe ByteCount -> HostPort -> TcpOpts -> (NS.SockAddr -> Conn () -> m a) -> m a
+withTcpClientConn mayLim hp to = withAcquire (tcpClientConn mayLim hp to) . uncurry
 
-sendUdpEncoder :: NS.Socket -> NS.SockAddr -> Encoder
-sendUdpEncoder sock addr = Encoder $ \p -> do
-  bs <- putTarget p
-  void (NSB.sendTo sock bs addr)
-
-tcpClient :: HostPort -> TcpOpts -> Acquire (Encoder, Decoder)
-tcpClient hp (TcpOpts finTo) = fmap (\(enc, dec, _) -> (enc, dec)) (mkAcquire acq rel)
+tcpServerSock :: HostPort -> Acquire NS.Socket
+tcpServerSock hp = mkAcquire acq rel
  where
   acq = do
-    sock <- targetConnect (Target hp SockTyTcp)
-    (enc, dec) <- socketBidi sock
-    pure (enc, dec, sock)
-  rel (_, _, sock) =
-    if finTo > 0 then NS.gracefulClose sock finTo else NS.close sock
+    sock <- targetBind (Target hp SockTyTcp RoleServer)
+    NS.listen sock 1024
+    pure sock
+  rel = NS.close
 
-withTcpClient :: MonadUnliftIO m => HostPort -> TcpOpts -> (Encoder -> Decoder -> m a) -> m a
-withTcpClient hp to f = withAcquire (tcpClient hp to) (uncurry f)
+tcpServerConn :: Maybe ByteCount -> HostPort -> TcpOpts -> Acquire (Acquire (NS.SockAddr, Conn ()))
+tcpServerConn mayLim hp to = do
+  srvSock <- tcpServerSock hp
+  pure $ do
+    (addr, cliSock) <- tcpAcceptSock to srvSock
+    dec <- liftIO (streamDecoder mayLim cliSock)
+    let enc = streamEncoder cliSock
+    pure (addr, Conn dec enc)
 
-udpClient :: HostPort -> Acquire Encoder
-udpClient hp = fmap fst (mkAcquire acq rel)
+tcpAcceptSock :: TcpOpts -> NS.Socket -> Acquire (NS.SockAddr, NS.Socket)
+tcpAcceptSock (TcpOpts finTo) servSock = mkAcquire acq rel
  where
-  acq = do
-    sock <- targetConnect (Target hp SockTyUdp)
-    enc <- socketEncoder sock
-    pure (enc, sock)
+  acq = fmap swap (NS.accept servSock)
+  rel (_, sock) = if finTo > 0 then NS.gracefulClose sock finTo else NS.close sock
+
+udpClientSock :: HostPort -> Acquire (NS.SockAddr, NS.Socket)
+udpClientSock hp = mkAcquire acq rel
+ where
+  acq = fmap swap (targetConnect (Target hp SockTyUdp RoleClient))
   rel = NS.close . snd
 
-withUdpClient :: HostPort -> (Encoder -> IO a) -> IO a
-withUdpClient = withAcquire . udpClient
+udpClientConn :: Maybe ByteCount -> HostPort -> Acquire (NS.SockAddr, Conn ())
+udpClientConn mayLim hp = do
+  (addr, sock) <- udpClientSock hp
+  let dec = datagramClientDecoder mayLim sock
+      enc = datagramClientEncoder sock
+  pure (addr, Conn dec enc)
 
-udpServer :: HostPort -> Acquire Decoder
-udpServer hp = fmap fst (mkAcquire acq rel)
+withUdpClientConn :: MonadUnliftIO m => Maybe ByteCount -> HostPort -> (NS.SockAddr -> Conn () -> m a) -> m a
+withUdpClientConn mayLim hp = withAcquire (udpClientConn mayLim hp) . uncurry
+
+udpServerSock :: HostPort -> Acquire NS.Socket
+udpServerSock hp = mkAcquire acq rel
  where
-  acq = do
-    sock <- targetBind (Target hp SockTyUdp)
-    dec <- socketDecoder sock
-    pure (dec, sock)
-  rel = NS.close . snd
+  acq = targetBind (Target hp SockTyTcp RoleServer)
+  rel = NS.close
 
-withUdpServer :: HostPort -> (Decoder -> IO a) -> IO a
-withUdpServer = withAcquire . udpServer
+udpServerConn :: Maybe ByteCount -> HostPort -> Acquire (Conn NS.SockAddr)
+udpServerConn mayLim hp = do
+  sock <- udpServerSock hp
+  let dec = datagramServerDecoder mayLim sock
+      enc = datagramServerEncoder sock
+  pure (Conn dec enc)
 
--- | Send UDP messages without connecting.
--- Each invocation of the encoder sends a separate packet.
-packetUdpClient :: HostPort -> Acquire Encoder
-packetUdpClient hp = fmap fst (mkAcquire acq rel)
- where
-  acq = do
-    (sock, addr) <- targetOpen (Target hp SockTyUdp)
-    pure (sendUdpEncoder sock addr, sock)
-  rel = NS.close . snd
-
-withPacketUdpClient :: HostPort -> (Encoder -> IO a) -> IO a
-withPacketUdpClient = withAcquire . packetUdpClient
+withUdpServerConn :: MonadUnliftIO m => Maybe ByteCount -> HostPort -> (Conn NS.SockAddr -> m a) -> m a
+withUdpServerConn mayLim hp = withAcquire (udpServerConn mayLim hp)
