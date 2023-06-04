@@ -3,7 +3,9 @@ module Dahdit.Network
   , runDecoder
   , Encoder (..)
   , runEncoder
+  , Conn (..)
   , HostPort (..)
+  , TcpOpts (..)
   , tcpClientConn
   , withTcpClientConn
   , tcpServerConn
@@ -28,6 +30,9 @@ import Network.Socket.ByteString qualified as NSB
 
 maxRecv :: Int
 maxRecv = 65535
+
+maxQueue :: Int
+maxQueue = 1024
 
 sockRecvUntil :: NS.Socket -> IORef ByteString -> Int -> IO ()
 sockRecvUntil sock ref len = go
@@ -95,7 +100,7 @@ datagramServerEncoder sock = Encoder (\addr -> putTarget >=> flip (NSB.sendAllTo
 data Conn k = Conn {connDecoder :: Decoder k, connEncoder :: Encoder k}
 
 data HostPort = HostPort
-  { hpHost :: !(Maybe String)
+  { hpHost :: !String
   , hpPort :: !Int
   }
   deriving stock (Eq, Ord, Show)
@@ -129,7 +134,7 @@ targetResolve t@(Target (HostPort host port) sockTy role) = do
           { NS.addrSocketType = sockTyReal sockTy
           , NS.addrFlags = [NS.AI_PASSIVE | role == RoleServer]
           }
-  infos <- NS.getAddrInfo (Just hints) host (Just (show port))
+  infos <- NS.getAddrInfo (Just hints) (Just host) (Just (show port))
   case infos of
     [] -> fail ("Could not resolve address: " ++ show t)
     info : _ -> pure info
@@ -175,7 +180,7 @@ tcpServerSock hp = mkAcquire acq rel
  where
   acq = do
     sock <- targetBind (Target hp SockTyTcp RoleServer)
-    NS.listen sock 1024
+    NS.listen sock maxQueue
     pure sock
   rel = NS.close
 
@@ -213,7 +218,7 @@ withUdpClientConn mayLim hp = withAcquire (udpClientConn mayLim hp) . uncurry
 udpServerSock :: HostPort -> Acquire NS.Socket
 udpServerSock hp = mkAcquire acq rel
  where
-  acq = targetBind (Target hp SockTyTcp RoleServer)
+  acq = targetBind (Target hp SockTyUdp RoleServer)
   rel = NS.close
 
 udpServerConn :: Maybe ByteCount -> HostPort -> Acquire (Conn NS.SockAddr)

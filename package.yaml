@@ -83,5 +83,7 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - dahdit-network
+    - async >= 2.2 && < 2.3
+    - stm >= 2.5 && < 2.6
     - tasty >= 1.4 && < 1.5
     - tasty-hunit >= 0.10 && < 0.11

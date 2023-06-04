@@ -142,12 +142,14 @@ test-suite dahdit-network-test
       TypeFamilies
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -fno-warn-unused-top-binds -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.12 && <5
+      async ==2.2.*
+    , base >=4.12 && <5
     , bytestring ==0.11.*
     , dahdit ==0.4.*
     , dahdit-network
     , network ==3.1.*
     , resourcet ==1.2.*
+    , stm ==2.5.*
     , tasty ==1.4.*
     , tasty-hunit ==0.10.*
     , unliftio-core ==0.2.*
